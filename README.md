@@ -15,11 +15,11 @@ Windows 上的 Codex Plus 用量与对话状态悬浮小组件。
 
 ### 主界面
 
-![Codex Monitor 主界面](docs/images/widget-main.png)
+![Codex Monitor 主界面](docs/images/widget-main-svg-v2.png)
 
 ### 主界面与预测浮窗
 
-![Codex Monitor 主界面与后续预测浮窗](docs/images/widget-with-forecast.png)
+![Codex Monitor 主界面与后续预测浮窗](docs/images/widget-forecast-svg-v2.png)
 
 ## 下载哪个版本？
 
