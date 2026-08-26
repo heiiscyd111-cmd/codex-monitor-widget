@@ -1,0 +1,19 @@
+{
+  "name": "codex-status-widget",
+  "version": "1.0.0",
+  "description": "Windows desktop widget for monitoring Codex usage and active conversations.",
+  "main": "main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check main.js && node --check preload.js",
+    "postinstall": "node node_modules/electron/install.js",
+    "build:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1"
+  },
+  "devDependencies": {
+    "electron": "43.1.1"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
