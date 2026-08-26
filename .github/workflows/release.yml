@@ -10,13 +10,13 @@ permissions:
   contents: write
 
 jobs:
-  windows-release:
+  windows-x64:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -29,17 +29,107 @@ jobs:
         run: |
           $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "v0.0.0-test" }
           ./scripts/build-release.ps1 -Version $version
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v6
+      - name: Verify Windows packages
+        shell: pwsh
+        run: |
+          $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "v0.0.0-test" }
+          $portableZip = "dist/CodexMonitor-$version-Windows-x64-Portable.zip"
+          $sourceZip = "dist/CodexMonitor-$version-Source.zip"
+          if (-not (Test-Path -LiteralPath $portableZip)) { throw "Missing $portableZip" }
+          if (-not (Test-Path -LiteralPath $sourceZip)) { throw "Missing $sourceZip" }
+          $windowsCheckDir = Join-Path $env:RUNNER_TEMP "codex-monitor-windows-check"
+          Expand-Archive -LiteralPath $portableZip -DestinationPath $windowsCheckDir
+          $portableDir = Join-Path $windowsCheckDir "CodexMonitor-$version-Windows-x64-Portable"
+          $executable = Join-Path $portableDir "CodexMonitor.exe"
+          if (-not (Test-Path -LiteralPath $executable)) { throw "Missing packaged executable" }
+          if (-not (Test-Path -LiteralPath (Join-Path $portableDir "resources/app/main.js"))) { throw "Missing packaged application" }
+          $process = Start-Process -FilePath $executable -ArgumentList "--smoke-test" -PassThru
+          if (-not $process.WaitForExit(30000)) {
+            Stop-Process -Id $process.Id -Force
+            throw "Windows smoke test timed out"
+          }
+          if ($process.ExitCode -ne 0) { throw "Windows smoke test failed with exit code $($process.ExitCode)" }
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v7
         with:
           name: CodexMonitor-Windows-x64
-          path: |
-            dist/*.zip
-            dist/SHA256SUMS.txt
+          path: dist/*.zip
           if-no-files-found: error
+
+  macos-build:
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            binary_arch: arm64
+            runner: macos-15
+          - arch: x64
+            binary_arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Check JavaScript
+        run: npm run check
+      - name: Build macOS package
+        env:
+          PACKAGE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0-test' }}
+        run: npm run build:mac -- --arch=${{ matrix.arch }} --version="$PACKAGE_VERSION"
+      - name: Verify macOS package
+        env:
+          PACKAGE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0-test' }}
+        run: |
+          archive="dist/CodexMonitor-$PACKAGE_VERSION-macOS-${{ matrix.arch }}.zip"
+          test -f "$archive"
+          mac_check_dir=$(mktemp -d)
+          ditto -x -k "$archive" "$mac_check_dir"
+          app_path=$(find "$mac_check_dir" -type d -name CodexMonitor.app -print -quit)
+          file "$app_path/Contents/MacOS/CodexMonitor" | grep -q "${{ matrix.binary_arch }}"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Contents/Info.plist")" = "io.github.asusfx80.codex-monitor-widget"
+          "$app_path/Contents/MacOS/CodexMonitor" --smoke-test | grep -q "CodexMonitor smoke test passed"
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: CodexMonitor-macOS-${{ matrix.arch }}
+          path: dist/CodexMonitor-*-macOS-${{ matrix.arch }}.zip
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs:
+      - windows-x64
+      - macos-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download platform artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: CodexMonitor-*
+          path: dist
+          merge-multiple: true
+      - name: Verify release set and checksums
+        run: |
+          zip_count=$(find dist -maxdepth 1 -type f -name '*.zip' | wc -l | tr -d ' ')
+          test "$zip_count" = "4"
+          cd dist
+          sha256sum *.zip > SHA256SUMS.txt
       - name: Create GitHub Release
-        if: github.ref_type == 'tag'
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/*.zip dist/SHA256SUMS.txt --generate-notes --title "Codex Monitor ${{ github.ref_name }}"
+        run: |
+          if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' | while IFS= read -r asset; do
+              gh release delete-asset "${{ github.ref_name }}" "$asset" --repo "${{ github.repository }}" --yes
+            done
+            gh release upload "${{ github.ref_name }}" dist/*.zip dist/SHA256SUMS.txt --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "${{ github.ref_name }}" dist/*.zip dist/SHA256SUMS.txt --repo "${{ github.repository }}" --generate-notes --title "Codex Monitor ${{ github.ref_name }}"
+          fi

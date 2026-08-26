@@ -1,16 +1,18 @@
 {
   "name": "codex-status-widget",
   "version": "1.0.6",
-  "description": "Windows desktop widget for monitoring Codex usage and active conversations.",
+  "description": "Windows and macOS desktop widget for monitoring Codex usage and active conversations.",
   "main": "main.js",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check preload.js",
+    "check": "node --check main.js && node --check preload.js && node --check scripts/build-macos.mjs",
     "postinstall": "node node_modules/electron/install.js",
+    "build:mac": "node scripts/build-macos.mjs",
     "build:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1"
   },
   "devDependencies": {
+    "@electron/packager": "20.3.0",
     "electron": "43.1.1"
   },
   "engines": {

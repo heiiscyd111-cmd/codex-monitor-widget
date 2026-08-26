@@ -1,5 +1,5 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, Notification, screen, shell } = require("electron");
-const { spawn, execFile } = require("child_process");
+const { spawn, spawnSync, execFile, execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -8,6 +8,7 @@ const { DatabaseSync } = require("node:sqlite");
 const CODEX_HOME = path.join(os.homedir(), ".codex");
 const STATE_DB = path.join(CODEX_HOME, "state_5.sqlite");
 const LOG_DB = path.join(CODEX_HOME, "logs_2.sqlite");
+const SMOKE_TEST = process.argv.includes("--smoke-test");
 let win;
 let tray;
 let appServer;
@@ -22,6 +23,20 @@ let tooltipWin;
 let pendingTooltipText = "";
 
 function findCodexBinary() {
+  if (process.platform === "darwin") {
+    let appPath = "";
+    try {
+      appPath = execFileSync("/usr/bin/osascript", ["-l", "JavaScript", "-e", 'ObjC.import("AppKit"); const url=$.NSWorkspace.sharedWorkspace.URLForApplicationWithBundleIdentifier("com.openai.codex"); url ? ObjC.unwrap(url.path) : ""'], { encoding: "utf8" }).trim();
+    } catch (_) {}
+    return [
+      appPath && path.join(appPath, "Contents", "Resources", "codex"),
+      process.arch === "arm64" ? "/opt/homebrew/bin/codex" : "/usr/local/bin/codex",
+    ].find(candidate => {
+      if (!candidate || !fs.existsSync(candidate)) return false;
+      const probe = spawnSync(candidate, ["app-server", "--help"], { stdio: "ignore", timeout: 5000 });
+      return !probe.error && probe.status === 0;
+    }) || null;
+  }
   const root = path.join(process.env.LOCALAPPDATA || "", "OpenAI", "Codex", "bin");
   if (!fs.existsSync(root)) return null;
   return fs.readdirSync(root)
@@ -34,12 +49,14 @@ function startAppServer() {
   if (appServer && !appServer.killed) return;
   const exe = findCodexBinary();
   if (!exe) return;
-  appServer = spawn(exe, ["app-server", "--listen", "stdio://"], {
+  rpcBuffer = "";
+  const server = spawn(exe, ["app-server", "--listen", "stdio://"], {
     stdio: ["pipe", "pipe", "ignore"],
     windowsHide: true,
   });
-  appServer.stdout.setEncoding("utf8");
-  appServer.stdout.on("data", chunk => {
+  appServer = server;
+  server.stdout.setEncoding("utf8");
+  server.stdout.on("data", chunk => {
     rpcBuffer += chunk;
     const lines = rpcBuffer.split(/\r?\n/);
     rpcBuffer = lines.pop() || "";
@@ -54,12 +71,16 @@ function startAppServer() {
       } catch (_) {}
     }
   });
-  appServer.on("exit", () => {
+  const reconnect = () => {
+    if (appServer !== server) return;
     appServer = null;
     for (const resolve of rpcCallbacks.values()) resolve({ error: { message: "Codex 状态服务已断开" } });
     rpcCallbacks.clear();
     setTimeout(startAppServer, 5000);
-  });
+  };
+  server.on("error", reconnect);
+  server.stdin.on("error", reconnect);
+  server.on("exit", reconnect);
   rpc("initialize", { clientInfo: { name: "codex-status-widget", version: "1.0.0" }, capabilities: {} })
     .then(refreshRateLimits)
     .catch(() => {});
@@ -204,10 +225,21 @@ function attachToCodexWindow() {
   );
 }
 
-function isCodexOpen() {
+function readCodexDesktopState() {
+  if (process.platform === "darwin") {
+    return new Promise(resolve => {
+      execFile("/usr/bin/osascript", ["-l", "JavaScript", "-e", 'ObjC.import("AppKit"); const apps=$.NSWorkspace.sharedWorkspace.runningApplications.js.filter(app => app.bundleIdentifier.js === "com.openai.codex"); JSON.stringify({open:apps.length>0,frontmost:apps.some(app => app.active)})'], (err, stdout) => {
+        if (err) return resolve({ open: false, frontmost: false });
+        try {
+          resolve(JSON.parse(stdout));
+        } catch (_) { resolve({ open: false, frontmost: false }); }
+      });
+    });
+  }
+  if (process.platform !== "win32") return Promise.resolve({ open: false, frontmost: false });
   return new Promise(resolve => {
     execFile("tasklist.exe", ["/FI", "IMAGENAME eq ChatGPT.exe", "/FO", "CSV", "/NH"], { windowsHide: true }, (err, stdout) => {
-      resolve(!err && /ChatGPT\.exe/i.test(stdout || ""));
+      resolve({ open: !err && /ChatGPT\.exe/i.test(stdout || ""), frontmost: false });
     });
   });
 }
@@ -222,7 +254,11 @@ async function makeSnapshot() {
     ? Number(weeklyRate.resetsAt) - Number(weeklyRate.windowDurationMins) * 60
     : 0;
   const activity = queryActivity(weeklyStartSeconds);
-  const codexOpen = await isCodexOpen();
+  const codexState = await readCodexDesktopState();
+  const codexOpen = codexState.open;
+  if (process.platform === "darwin" && win && !win.isDestroyed()) {
+    win.setAlwaysOnTop(codexState.frontmost, codexState.frontmost ? "floating" : "normal");
+  }
   const quota = rate => rate ? {
     usedPercent: Number(rate.usedPercent),
     remainingPercent: Math.max(0, 100 - Number(rate.usedPercent)),
@@ -243,7 +279,7 @@ async function makeSnapshot() {
     rateLimitReached: !!(lastRateLimits && lastRateLimits.rateLimitReachedType),
     checkedAt: Date.now(),
   };
-  if (lastSnapshot && lastSnapshot.running && !snapshot.running && lastSnapshot.current) {
+  if (process.platform === "win32" && lastSnapshot && lastSnapshot.running && !snapshot.running && lastSnapshot.current) {
     new Notification({
       title: "Codex 任务已完成",
       body: lastSnapshot.current.title,
@@ -260,12 +296,9 @@ async function makeSnapshot() {
 }
 
 function startForegroundWatcher() {
+  if (process.platform !== "win32") return;
   if (foregroundWatcher && !foregroundWatcher.killed) return;
-  foregroundWatcher = spawn(
-    "powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(__dirname, "watch-foreground.ps1")],
-    { stdio: ["ignore", "pipe", "ignore"], windowsHide: true },
-  );
+  foregroundWatcher = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(__dirname, "watch-foreground.ps1")], { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
   foregroundWatcher.stdout.setEncoding("utf8");
   let buffer = "";
   foregroundWatcher.stdout.on("data", chunk => {
@@ -348,12 +381,20 @@ function createWindow() {
   });
   win.loadFile("index.html");
   win.on("closed", () => { win = null; });
-  win.webContents.on("did-finish-load", () => makeSnapshot());
+  win.webContents.on("did-finish-load", async () => {
+    await makeSnapshot();
+    if (SMOKE_TEST) {
+      console.log("CodexMonitor smoke test passed");
+      app.quit();
+    }
+  });
 }
 
 function createTray() {
-  const icon = nativeImage.createFromPath(path.join(__dirname, "icon.png"));
-  tray = new Tray(icon.resize({ width: 16, height: 16 }));
+  const isMac = process.platform === "darwin";
+  const icon = nativeImage.createFromPath(path.join(__dirname, isMac ? "iconTemplate.png" : "icon.png"));
+  if (isMac) icon.setTemplateImage(true);
+  tray = new Tray(isMac ? icon : icon.resize({ width: 16, height: 16 }));
   tray.setToolTip("Codex 状态");
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "显示 / 隐藏", click: () => win && (win.isVisible() ? win.hide() : win.show()) },
@@ -361,12 +402,17 @@ function createTray() {
     { type: "separator" },
     { label: "退出小组件", click: () => app.quit() },
   ]));
-  tray.on("click", () => win && (win.isVisible() ? win.hide() : win.show()));
+  if (!isMac) tray.on("click", () => win && (win.isVisible() ? win.hide() : win.show()));
 }
 
 app.whenReady().then(() => {
-  app.setAppUserModelId("com.openai.codex.status-widget");
-  app.setLoginItemSettings({ openAtLogin: true, path: process.execPath, args: process.defaultApp ? [__dirname] : [] });
+  if (process.platform === "win32") {
+    app.setAppUserModelId("com.openai.codex.status-widget");
+    if (!SMOKE_TEST) app.setLoginItemSettings({ openAtLogin: true, path: process.execPath, args: process.defaultApp ? [__dirname] : [] });
+  } else if (process.platform === "darwin") {
+    app.dock.hide();
+    if (!SMOKE_TEST) app.setLoginItemSettings({ openAtLogin: true });
+  }
   createWindow();
   createTray();
   createTooltipWindow();
