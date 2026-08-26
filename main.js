@@ -289,7 +289,7 @@ function createTooltipWindow() {
     height: 84,
     frame: false,
     transparent: true,
-    resizable: false,
+    resizable: true,
     show: false,
     focusable: false,
     skipTaskbar: true,
