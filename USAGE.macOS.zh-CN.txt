@@ -3,12 +3,12 @@ Codex 用量状态条（macOS 内部试用版）
 适用范围
 
 1. macOS 14 或更高版本。
-2. Apple Silicon（M 系列）Mac。
+2. Apple Silicon（M 系列）或 Intel Mac。
 3. 已安装并登录 Codex 桌面应用，或已通过 Homebrew 安装并登录 Codex CLI。
 
 安装与首次启动
 
-1. 解压 CodexMonitor-vX.Y.Z-macOS-arm64.zip。
+1. Apple Silicon 解压 CodexMonitor-vX.Y.Z-macOS-arm64.zip；Intel 解压 CodexMonitor-vX.Y.Z-macOS-x64.zip。
 2. 将 CodexMonitor.app 移到“应用程序”目录。
 3. 首次启动若被 macOS 阻止，请在“系统设置 → 隐私与安全性”中选择“仍要打开”。
 4. 启动后应用仅显示在菜单栏，不会常驻 Dock。

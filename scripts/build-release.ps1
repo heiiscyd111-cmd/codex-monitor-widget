@@ -27,7 +27,7 @@ Compress-Archive -LiteralPath $portableDir -DestinationPath $portableZip -Compre
 $sourceName = "CodexMonitor-$Version-Source"
 $sourceDir = Join-Path $dist $sourceName
 New-Item -ItemType Directory -Path $sourceDir -Force | Out-Null
-$sourceFiles = @("main.js","preload.js","index.html","tooltip.html","package.json","package-lock.json","icon.png","icon.ico","set-codex-owner.ps1","watch-foreground.ps1","USAGE.zh-CN.txt","README.md","COMMERCIAL_USE.md","LICENSE",".gitignore")
+$sourceFiles = @("main.js","preload.js","index.html","tooltip.html","package.json","package-lock.json","icon.png","icon.ico","icon.icns","iconTemplate.png","iconTemplate@2x.png","set-codex-owner.ps1","watch-foreground.ps1","USAGE.zh-CN.txt","USAGE.macOS.zh-CN.txt","README.md","COMMERCIAL_USE.md","LICENSE",".gitignore")
 foreach ($file in $sourceFiles) {
   $sourcePath = Join-Path $projectRoot $file
   if (Test-Path -LiteralPath $sourcePath) { Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $sourceDir $file) -Force }
