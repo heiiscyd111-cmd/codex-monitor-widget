@@ -1,5 +1,5 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, Notification, screen, shell } = require("electron");
-const { spawn, execFile } = require("child_process");
+const { spawn, execFile, execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -23,8 +23,14 @@ let pendingTooltipText = "";
 
 function findCodexBinary() {
   if (process.platform === "darwin") {
-    const candidate = process.arch === "arm64" ? "/opt/homebrew/bin/codex" : "/usr/local/bin/codex";
-    return fs.existsSync(candidate) ? candidate : null;
+    let appPath = "";
+    try {
+      appPath = execFileSync("/usr/bin/osascript", ["-l", "JavaScript", "-e", 'ObjC.import("AppKit"); const url=$.NSWorkspace.sharedWorkspace.URLForApplicationWithBundleIdentifier("com.openai.codex"); url ? ObjC.unwrap(url.path) : ""'], { encoding: "utf8" }).trim();
+    } catch (_) {}
+    return [
+      appPath && path.join(appPath, "Contents", "Resources", "codex"),
+      process.arch === "arm64" ? "/opt/homebrew/bin/codex" : "/usr/local/bin/codex",
+    ].find(candidate => candidate && fs.existsSync(candidate)) || null;
   }
   const root = path.join(process.env.LOCALAPPDATA || "", "OpenAI", "Codex", "bin");
   if (!fs.existsSync(root)) return null;
@@ -209,6 +215,18 @@ function attachToCodexWindow() {
 }
 
 function isCodexOpen() {
+  if (process.platform === "darwin") {
+    return new Promise(resolve => {
+      execFile("/usr/bin/osascript", ["-l", "JavaScript", "-e", 'ObjC.import("AppKit"); const apps=$.NSWorkspace.sharedWorkspace.runningApplications.js.filter(app => app.bundleIdentifier.js === "com.openai.codex"); JSON.stringify({open:apps.length>0,frontmost:apps.some(app => app.active)})'], (err, stdout) => {
+        if (err) return resolve(false);
+        try {
+          const state = JSON.parse(stdout);
+          if (win && !win.isDestroyed()) win.setAlwaysOnTop(state.frontmost, state.frontmost ? "floating" : "normal");
+          resolve(state.open);
+        } catch (_) { resolve(false); }
+      });
+    });
+  }
   if (process.platform !== "win32") return Promise.resolve(false);
   return new Promise(resolve => {
     execFile("tasklist.exe", ["/FI", "IMAGENAME eq ChatGPT.exe", "/FO", "CSV", "/NH"], { windowsHide: true }, (err, stdout) => {
@@ -267,11 +285,7 @@ async function makeSnapshot() {
 function startForegroundWatcher() {
   if (process.platform !== "win32") return;
   if (foregroundWatcher && !foregroundWatcher.killed) return;
-  foregroundWatcher = spawn(
-    "powershell.exe",
-    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(__dirname, "watch-foreground.ps1")],
-    { stdio: ["ignore", "pipe", "ignore"], windowsHide: true },
-  );
+  foregroundWatcher = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(__dirname, "watch-foreground.ps1")], { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
   foregroundWatcher.stdout.setEncoding("utf8");
   let buffer = "";
   foregroundWatcher.stdout.on("data", chunk => {

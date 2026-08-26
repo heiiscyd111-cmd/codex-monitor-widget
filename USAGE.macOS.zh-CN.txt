@@ -4,7 +4,7 @@ Codex 用量状态条（macOS 内部试用版）
 
 1. macOS 14 或更高版本。
 2. Apple Silicon（M 系列）Mac。
-3. 已通过 Homebrew 安装并登录 Codex CLI：/opt/homebrew/bin/codex。
+3. 已安装并登录 Codex 桌面应用，或已通过 Homebrew 安装并登录 Codex CLI。
 
 安装与首次启动
 
@@ -20,9 +20,19 @@ Codex 用量状态条（macOS 内部试用版）
 - “立即刷新”重新读取额度和本地任务状态。
 - “退出小组件”完全退出应用。
 
+完整桌面模式
+
+安装 Codex 桌面应用后，小组件会优先使用应用内置 CLI，并提供：
+
+- Codex 打开时自动显示小组件。
+- Codex 位于前台时保持悬浮，切换到其他应用时恢复普通窗口层级。
+- codex:// 深链接跳转。
+
+这些检测使用 macOS Workspace API，不需要辅助功能、录屏或自动化权限。
+
 CLI-only 模式
 
-本版本使用 Homebrew Codex 读取额度和 ~/.codex 下的本地任务状态，不要求安装 Codex 桌面应用。桌面应用启动检测、前台悬浮联动和 codex:// 跳转不可用。
+找不到桌面应用内置 CLI 时，小组件会使用 Homebrew Codex：Apple Silicon 路径为 /opt/homebrew/bin/codex，Intel 路径为 /usr/local/bin/codex。CLI-only 模式可读取额度和 ~/.codex 下的本地任务状态，但桌面应用启动检测、前台悬浮联动和 codex:// 跳转不可用。
 
 未签名版本限制
 
