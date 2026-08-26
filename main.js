@@ -8,6 +8,7 @@ const { DatabaseSync } = require("node:sqlite");
 const CODEX_HOME = path.join(os.homedir(), ".codex");
 const STATE_DB = path.join(CODEX_HOME, "state_5.sqlite");
 const LOG_DB = path.join(CODEX_HOME, "logs_2.sqlite");
+const SMOKE_TEST = process.argv.includes("--smoke-test");
 let win;
 let tray;
 let appServer;
@@ -368,7 +369,13 @@ function createWindow() {
   });
   win.loadFile("index.html");
   win.on("closed", () => { win = null; });
-  win.webContents.on("did-finish-load", () => makeSnapshot());
+  win.webContents.on("did-finish-load", async () => {
+    await makeSnapshot();
+    if (SMOKE_TEST) {
+      console.log("CodexMonitor smoke test passed");
+      app.quit();
+    }
+  });
 }
 
 function createTray() {
@@ -389,10 +396,10 @@ function createTray() {
 app.whenReady().then(() => {
   if (process.platform === "win32") {
     app.setAppUserModelId("com.openai.codex.status-widget");
-    app.setLoginItemSettings({ openAtLogin: true, path: process.execPath, args: process.defaultApp ? [__dirname] : [] });
+    if (!SMOKE_TEST) app.setLoginItemSettings({ openAtLogin: true, path: process.execPath, args: process.defaultApp ? [__dirname] : [] });
   } else if (process.platform === "darwin") {
     app.dock.hide();
-    app.setLoginItemSettings({ openAtLogin: true });
+    if (!SMOKE_TEST) app.setLoginItemSettings({ openAtLogin: true });
   }
   createWindow();
   createTray();

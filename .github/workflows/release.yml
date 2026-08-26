@@ -10,6 +10,43 @@ permissions:
   contents: write
 
 jobs:
+  macos-x64:
+    runs-on: macos-15-intel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Check JavaScript
+        run: npm run check
+      - name: Build Intel package
+        env:
+          PACKAGE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0-test' }}
+        run: npm run build:mac -- --arch=x64 --version="$PACKAGE_VERSION"
+      - name: Verify Intel package
+        env:
+          PACKAGE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0-test' }}
+        run: |
+          archive="dist/CodexMonitor-$PACKAGE_VERSION-macOS-x64.zip"
+          test -f "$archive"
+          x64_check_dir=$(mktemp -d)
+          ditto -x -k "$archive" "$x64_check_dir"
+          app_path=$(find "$x64_check_dir" -type d -name CodexMonitor.app -print -quit)
+          file "$app_path/Contents/MacOS/CodexMonitor" | grep -q x86_64
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Contents/Info.plist")" = "io.github.asusfx80.codex-monitor-widget"
+          "$app_path/Contents/MacOS/CodexMonitor" --smoke-test | grep -q "CodexMonitor smoke test passed"
+      - name: Upload Intel artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: CodexMonitor-macOS-x64
+          path: dist/CodexMonitor-*-macOS-x64.zip
+          if-no-files-found: error
+
   windows-release:
     runs-on: windows-latest
     steps:
