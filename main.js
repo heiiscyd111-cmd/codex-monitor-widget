@@ -22,6 +22,10 @@ let tooltipWin;
 let pendingTooltipText = "";
 
 function findCodexBinary() {
+  if (process.platform === "darwin") {
+    const candidate = process.arch === "arm64" ? "/opt/homebrew/bin/codex" : "/usr/local/bin/codex";
+    return fs.existsSync(candidate) ? candidate : null;
+  }
   const root = path.join(process.env.LOCALAPPDATA || "", "OpenAI", "Codex", "bin");
   if (!fs.existsSync(root)) return null;
   return fs.readdirSync(root)
@@ -205,6 +209,7 @@ function attachToCodexWindow() {
 }
 
 function isCodexOpen() {
+  if (process.platform !== "win32") return Promise.resolve(false);
   return new Promise(resolve => {
     execFile("tasklist.exe", ["/FI", "IMAGENAME eq ChatGPT.exe", "/FO", "CSV", "/NH"], { windowsHide: true }, (err, stdout) => {
       resolve(!err && /ChatGPT\.exe/i.test(stdout || ""));
@@ -243,7 +248,7 @@ async function makeSnapshot() {
     rateLimitReached: !!(lastRateLimits && lastRateLimits.rateLimitReachedType),
     checkedAt: Date.now(),
   };
-  if (lastSnapshot && lastSnapshot.running && !snapshot.running && lastSnapshot.current) {
+  if (process.platform === "win32" && lastSnapshot && lastSnapshot.running && !snapshot.running && lastSnapshot.current) {
     new Notification({
       title: "Codex 任务已完成",
       body: lastSnapshot.current.title,
@@ -260,6 +265,7 @@ async function makeSnapshot() {
 }
 
 function startForegroundWatcher() {
+  if (process.platform !== "win32") return;
   if (foregroundWatcher && !foregroundWatcher.killed) return;
   foregroundWatcher = spawn(
     "powershell.exe",
@@ -352,8 +358,10 @@ function createWindow() {
 }
 
 function createTray() {
-  const icon = nativeImage.createFromPath(path.join(__dirname, "icon.png"));
-  tray = new Tray(icon.resize({ width: 16, height: 16 }));
+  const isMac = process.platform === "darwin";
+  const icon = nativeImage.createFromPath(path.join(__dirname, isMac ? "iconTemplate.png" : "icon.png"));
+  if (isMac) icon.setTemplateImage(true);
+  tray = new Tray(isMac ? icon : icon.resize({ width: 16, height: 16 }));
   tray.setToolTip("Codex 状态");
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "显示 / 隐藏", click: () => win && (win.isVisible() ? win.hide() : win.show()) },
@@ -361,12 +369,17 @@ function createTray() {
     { type: "separator" },
     { label: "退出小组件", click: () => app.quit() },
   ]));
-  tray.on("click", () => win && (win.isVisible() ? win.hide() : win.show()));
+  if (!isMac) tray.on("click", () => win && (win.isVisible() ? win.hide() : win.show()));
 }
 
 app.whenReady().then(() => {
-  app.setAppUserModelId("com.openai.codex.status-widget");
-  app.setLoginItemSettings({ openAtLogin: true, path: process.execPath, args: process.defaultApp ? [__dirname] : [] });
+  if (process.platform === "win32") {
+    app.setAppUserModelId("com.openai.codex.status-widget");
+    app.setLoginItemSettings({ openAtLogin: true, path: process.execPath, args: process.defaultApp ? [__dirname] : [] });
+  } else if (process.platform === "darwin") {
+    app.dock.hide();
+    app.setLoginItemSettings({ openAtLogin: true });
+  }
   createWindow();
   createTray();
   createTooltipWindow();
