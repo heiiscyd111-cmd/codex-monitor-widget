@@ -35,7 +35,7 @@ body{padding:6px;background:transparent}
   </header>
   <section class="content">
     <div class="usage">
-      <div class="quota quota-week">
+      <div class="quota quota-week" id="weekQuota">
         <div class="ring" id="weekRing"><svg class="ring-svg" viewBox="0 0 44 44" aria-hidden="true"><circle class="ring-progress" cx="22" cy="22" r="18.5" pathLength="100"/></svg><div class="ring-value"><div class="percent" id="weekPercent">--</div></div></div>
         <div class="usage-copy"><div class="usage-title">本周额度</div><div class="reset" id="weekReset">读取中…</div></div>
       </div>
@@ -65,10 +65,12 @@ function remainingTime(ms){let d=Math.max(0,ms-Date.now()),h=Math.floor(d/360000
 function fiveHourSummary(quota){if(!quota||!quota.resetsAt)return "未提供";const span=5*60*60*1000,end=quota.resetsAt,start=end-span;return "本轮 "+clock(start)+"–"+clock(end)+"\n"+remainingTime(end)+"后重置"}
 function predictedWindow(a,b){return clock(a)+"–"+clock(b)}
 function fiveHourDetails(quota){if(!quota||!quota.resetsAt)return "今日暂无后续窗口";const span=5*60*60*1000,end=quota.resetsAt,next=[],tomorrow=new Date();tomorrow.setHours(24,0,0,0);for(let a=end;a<tomorrow.getTime();a+=span){next.push((next.length+1)+". "+predictedWindow(a,a+span))}return next.length?next.join("\n"):"今日暂无后续窗口"}
+function tokenCount(n){return Number(n||0).toLocaleString("zh-CN")+" tokens"}
+function weeklyTooltip(s){return {title:"本周用量",kind:"weekly",dailyTokens:Number(s&&s.dailyTokens||0),weeklyTokens:Number(s&&s.weeklyTokens||0),models:s&&Array.isArray(s.weeklyModelUsage)?s.weeklyModelUsage:[]}}
 function renderQuota(prefix,quota){const remain=quota&&quota.remainingPercent;$(prefix+"Percent").textContent=remain==null?"--":Math.round(remain)+"%";$(prefix+"Ring").style.setProperty("--p",remain||0);$(prefix+"Reset").textContent=prefix==="five"?fiveHourSummary(quota):(quota?countdown(quota.resetsAt):"未提供")}
 function render(s){snapshot=s;$("plan").textContent="Codex Plus";renderQuota("five",s.fiveHour);renderQuota("week",s.weekly);$("dot").className="dot "+(s.running?"running":"");$("tailDot").className="status-orb "+(s.running?"running":"");$("statusTail").title=s.running?"正在运行":"运行完成";$("status").textContent=s.running?"正在运行":"运行完成";$("taskTitle").textContent=s.current?s.current.title:"暂无最近任务";$("model").textContent=s.current&&s.current.model?s.current.model:"";$("tokens").textContent=s.current?compact(s.current.tokensUsed):"";$("updated").textContent=s.current?ago(s.current.updatedAt):"";$("elapsed").textContent=s.running&&s.current?duration(s.current.startedAt):"";$("appState").textContent=(s.codexOpen?"● Codex 已打开":"○ Codex 未打开")+" · 今日 "+compact(s.dailyTokens||0)}
 window.codexWidget.onStatus(render);window.codexWidget.getStatus().then(render);
-$("close").onclick=()=>window.codexWidget.hide();$("refresh").onclick=()=>window.codexWidget.refresh();$("openCodex").onclick=()=>window.codexWidget.openCodex();$("task").onclick=()=>snapshot&&snapshot.current&&window.codexWidget.openTask(snapshot.current.id);$("fiveQuota").addEventListener("mouseenter",()=>window.codexWidget.showTooltip(fiveHourDetails(snapshot&&snapshot.fiveHour)));$("fiveQuota").addEventListener("mouseleave",()=>window.codexWidget.hideTooltip());
+$("close").onclick=()=>window.codexWidget.hide();$("refresh").onclick=()=>window.codexWidget.refresh();$("openCodex").onclick=()=>window.codexWidget.openCodex();$("task").onclick=()=>snapshot&&snapshot.current&&window.codexWidget.openTask(snapshot.current.id);$("weekQuota").addEventListener("mouseenter",()=>window.codexWidget.showTooltip(weeklyTooltip(snapshot)));$("weekQuota").addEventListener("mouseleave",()=>window.codexWidget.hideTooltip());$("fiveQuota").addEventListener("mouseenter",()=>window.codexWidget.showTooltip({title:"后续预测窗口",text:fiveHourDetails(snapshot&&snapshot.fiveHour)}));$("fiveQuota").addEventListener("mouseleave",()=>window.codexWidget.hideTooltip());
 setInterval(()=>snapshot&&render(snapshot),1000);
 </script>
 </body>

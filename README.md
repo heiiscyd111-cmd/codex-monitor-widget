@@ -7,6 +7,7 @@ Windows 上的 Codex Plus 用量与对话状态悬浮小组件。
 - 本周额度、重置时间和倒计时
 - 5 小时额度、当前窗口和倒计时
 - 当日 Token 使用量
+- 本周额度悬浮详情：今日 Token、本额度周期 Token、各模型 Token 明细
 - 后续 5 小时预测窗口
 - 对话运行时绿灯、完成后灰灯
 - 随 Codex 显示并悬浮在 Codex 上方
@@ -20,6 +21,17 @@ Windows 上的 Codex Plus 用量与对话状态悬浮小组件。
 ### 主界面与预测浮窗
 
 ![Codex Monitor 主界面与后续预测浮窗](docs/images/widget-forecast-svg-v2.png)
+
+### 本周用量悬浮窗
+
+![Codex Monitor 本周 Token 与模型用量](docs/images/widget-weekly-usage-v1.0.5.png)
+
+## 界面说明
+
+- **本周额度**：显示剩余百分比、重置日期和倒计时；鼠标悬停后显示今日 Token、本额度周期 Token，以及各模型 Token 明细。
+- **5 小时额度**：显示当前窗口、剩余比例和重置倒计时；鼠标悬停后显示当天后续预测窗口。
+- **状态灯**：绿色表示有 Codex 对话正在生成或执行工具，灰色表示当前没有任务运行。
+- Token 与模型统计来自本机 Codex 日志；内部审核模型不会计入模型明细。
 
 ## 下载哪个版本？
 

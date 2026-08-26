@@ -84,7 +84,7 @@ async function refreshRateLimits() {
   } catch (_) {}
 }
 
-function queryActivity() {
+function queryActivity(weeklyStartSeconds = 0) {
   const now = Math.floor(Date.now() / 1000);
   let threads = [];
   try {
@@ -101,6 +101,8 @@ function queryActivity() {
 
   let activeTurn = null;
   let dailyTokens = 0;
+  let weeklyTokens = 0;
+  let weeklyModelUsage = [];
   try {
     const db = new DatabaseSync(LOG_DB, { readOnly: true });
     for (const thread of threads) {
@@ -125,21 +127,46 @@ function queryActivity() {
       const candidate = { thread, lastTs: Number(latestEvent.ts), startedAt: start && start.ts ? Number(start.ts) * 1000 : Number(latestEvent.ts) * 1000 };
       if (!activeTurn || candidate.lastTs > activeTurn.lastTs) activeTurn = candidate;
     }
+    const usageSince = since => {
+      const rows = db.prepare(`
+        SELECT feedback_log_body AS body FROM logs
+        WHERE ts >= ? AND target='codex_core::session::turn'
+          AND (feedback_log_body LIKE '%codex.turn.token_usage.total_tokens=%'
+            OR feedback_log_body LIKE '%total_usage_tokens=%')
+      `).all(since);
+      const perTurn = new Map();
+      for (const row of rows) {
+        const body = String(row.body || "");
+        const turn = body.match(/turn(?:\.id|_id)=([0-9a-f-]{20,})/i);
+        const total = body.match(/(?:codex\.turn\.token_usage\.total_tokens|total_usage_tokens)=(\d+)/);
+        const model = body.match(/\bmodel=\"?([^\"\s}:]+)\"?/i);
+        if (!turn || !total) continue;
+        const modelName = model ? model[1] : "未知模型";
+        if (modelName === "codex-auto-review") continue;
+        const previous = perTurn.get(turn[1]);
+        if (!previous || Number(total[1]) > previous.tokens) {
+          perTurn.set(turn[1], { tokens: Number(total[1]), model: modelName });
+        }
+      }
+      const byModel = new Map();
+      let total = 0;
+      for (const item of perTurn.values()) {
+        total += item.tokens;
+        byModel.set(item.model, (byModel.get(item.model) || 0) + item.tokens);
+      }
+      return {
+        total,
+        byModel: Array.from(byModel, ([model, tokens]) => ({ model, tokens }))
+          .sort((a, b) => b.tokens - a.tokens),
+      };
+    };
     const midnight = new Date();
     midnight.setHours(0, 0, 0, 0);
-    const usageRows = db.prepare(`
-      SELECT feedback_log_body AS body FROM logs
-      WHERE ts >= ? AND target='codex_core::session::turn'
-        AND feedback_log_body LIKE '%codex.turn.token_usage.total_tokens=%'
-    `).all(Math.floor(midnight.getTime() / 1000));
-    const perTurn = new Map();
-    for (const row of usageRows) {
-      const body = String(row.body || "");
-      const turn = body.match(/turn\.id=([0-9a-f-]{20,})/i);
-      const total = body.match(/codex\.turn\.token_usage\.total_tokens=(\d+)/);
-      if (turn && total) perTurn.set(turn[1], Math.max(perTurn.get(turn[1]) || 0, Number(total[1])));
-    }
-    dailyTokens = Array.from(perTurn.values()).reduce((sum, value) => sum + value, 0);
+    const dailyUsage = usageSince(Math.floor(midnight.getTime() / 1000));
+    const weeklyUsage = usageSince(weeklyStartSeconds || Math.floor(midnight.getTime() / 1000));
+    dailyTokens = dailyUsage.total;
+    weeklyTokens = weeklyUsage.total;
+    weeklyModelUsage = weeklyUsage.byModel;
     db.close();
   } catch (_) {}
 
@@ -155,6 +182,8 @@ function queryActivity() {
       model: current.model || "",
     },
     dailyTokens,
+    weeklyTokens,
+    weeklyModelUsage,
     recent: threads.slice(0, 3).map(t => ({
       id: t.id,
       title: t.title || "未命名任务",
@@ -162,7 +191,6 @@ function queryActivity() {
     })),
   };
 }
-
 function attachToCodexWindow() {
   if (!win || win.isDestroyed()) return;
   const handle = process.arch === "x64"
@@ -185,13 +213,16 @@ function isCodexOpen() {
 }
 
 async function makeSnapshot() {
-  const activity = queryActivity();
-  const codexOpen = await isCodexOpen();
   const primaryRate = lastRateLimits && lastRateLimits.primary;
   const secondaryRate = lastRateLimits && lastRateLimits.secondary;
   const rates = [primaryRate, secondaryRate].filter(Boolean);
   const fiveHourRate = rates.find(rate => Number(rate.windowDurationMins) === 300) || null;
   const weeklyRate = rates.find(rate => Number(rate.windowDurationMins) === 10080) || null;
+  const weeklyStartSeconds = weeklyRate && weeklyRate.resetsAt
+    ? Number(weeklyRate.resetsAt) - Number(weeklyRate.windowDurationMins) * 60
+    : 0;
+  const activity = queryActivity(weeklyStartSeconds);
+  const codexOpen = await isCodexOpen();
   const quota = rate => rate ? {
     usedPercent: Number(rate.usedPercent),
     remainingPercent: Math.max(0, 100 - Number(rate.usedPercent)),
@@ -204,6 +235,8 @@ async function makeSnapshot() {
     current: activity.current,
     recent: activity.recent,
     dailyTokens: activity.dailyTokens,
+    weeklyTokens: activity.weeklyTokens,
+    weeklyModelUsage: activity.weeklyModelUsage,
     planType: lastRateLimits && lastRateLimits.planType,
     fiveHour: quota(fiveHourRate),
     weekly: quota(weeklyRate),
@@ -274,22 +307,24 @@ function createTooltipWindow() {
   });
 }
 
-function showQuotaTooltip(text) {
+function showQuotaTooltip(detail) {
   if (!tooltipWin || tooltipWin.isDestroyed() || !win || win.isDestroyed()) return;
-  pendingTooltipText = String(text || "");
-  const predictionCount = pendingTooltipText.split(/\r?\n/).filter(line => /^\s*\d+[.、]/.test(line)).length;
-  const tooltipHeight = predictionCount ? 34 + predictionCount * 17 : 52;
-  tooltipWin.setSize(145, tooltipHeight, false);
+  const payload = typeof detail === "string" ? { title: "后续预测窗口", text: detail } : detail || {};
+  pendingTooltipText = payload;
+  const lines = String(payload.text || "").split(/\r?\n/).filter(Boolean);
+  const modelCount = Array.isArray(payload.models) ? payload.models.length : 0;
+  const tooltipHeight = payload.kind === "weekly" ? 92 + Math.max(1, modelCount) * 18 : Math.max(52, 31 + lines.length * 17);
+  const tooltipWidth = payload.kind === "weekly" ? 205 : 145;
+  tooltipWin.setSize(tooltipWidth, tooltipHeight, false);
   const cursor = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursor).workArea;
   const size = tooltipWin.getBounds();
   const x = Math.max(display.x + 6, Math.min(cursor.x - Math.round(size.width / 2), display.x + display.width - size.width - 6));
   const y = Math.max(display.y + 6, Math.min(cursor.y + 16, display.y + display.height - size.height - 6));
   tooltipWin.setPosition(x, y, false);
-  tooltipWin.webContents.send("quota-tooltip", pendingTooltipText);
+  tooltipWin.webContents.send("quota-tooltip", payload);
   tooltipWin.showInactive();
 }
-
 function createWindow() {
   const area = screen.getPrimaryDisplay().workArea;
   const widgetWidth = Math.min(470, area.width - 24);
