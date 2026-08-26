@@ -1,5 +1,5 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, Notification, screen, shell } = require("electron");
-const { spawn, execFile, execFileSync } = require("child_process");
+const { spawn, spawnSync, execFile, execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -31,7 +31,11 @@ function findCodexBinary() {
     return [
       appPath && path.join(appPath, "Contents", "Resources", "codex"),
       process.arch === "arm64" ? "/opt/homebrew/bin/codex" : "/usr/local/bin/codex",
-    ].find(candidate => candidate && fs.existsSync(candidate)) || null;
+    ].find(candidate => {
+      if (!candidate || !fs.existsSync(candidate)) return false;
+      const probe = spawnSync(candidate, ["app-server", "--help"], { stdio: "ignore", timeout: 5000 });
+      return !probe.error && probe.status === 0;
+    }) || null;
   }
   const root = path.join(process.env.LOCALAPPDATA || "", "OpenAI", "Codex", "bin");
   if (!fs.existsSync(root)) return null;
@@ -45,12 +49,14 @@ function startAppServer() {
   if (appServer && !appServer.killed) return;
   const exe = findCodexBinary();
   if (!exe) return;
-  appServer = spawn(exe, ["app-server", "--listen", "stdio://"], {
+  rpcBuffer = "";
+  const server = spawn(exe, ["app-server", "--listen", "stdio://"], {
     stdio: ["pipe", "pipe", "ignore"],
     windowsHide: true,
   });
-  appServer.stdout.setEncoding("utf8");
-  appServer.stdout.on("data", chunk => {
+  appServer = server;
+  server.stdout.setEncoding("utf8");
+  server.stdout.on("data", chunk => {
     rpcBuffer += chunk;
     const lines = rpcBuffer.split(/\r?\n/);
     rpcBuffer = lines.pop() || "";
@@ -65,12 +71,16 @@ function startAppServer() {
       } catch (_) {}
     }
   });
-  appServer.on("exit", () => {
+  const reconnect = () => {
+    if (appServer !== server) return;
     appServer = null;
     for (const resolve of rpcCallbacks.values()) resolve({ error: { message: "Codex 状态服务已断开" } });
     rpcCallbacks.clear();
     setTimeout(startAppServer, 5000);
-  });
+  };
+  server.on("error", reconnect);
+  server.stdin.on("error", reconnect);
+  server.on("exit", reconnect);
   rpc("initialize", { clientInfo: { name: "codex-status-widget", version: "1.0.0" }, capabilities: {} })
     .then(refreshRateLimits)
     .catch(() => {});
@@ -215,23 +225,21 @@ function attachToCodexWindow() {
   );
 }
 
-function isCodexOpen() {
+function readCodexDesktopState() {
   if (process.platform === "darwin") {
     return new Promise(resolve => {
       execFile("/usr/bin/osascript", ["-l", "JavaScript", "-e", 'ObjC.import("AppKit"); const apps=$.NSWorkspace.sharedWorkspace.runningApplications.js.filter(app => app.bundleIdentifier.js === "com.openai.codex"); JSON.stringify({open:apps.length>0,frontmost:apps.some(app => app.active)})'], (err, stdout) => {
-        if (err) return resolve(false);
+        if (err) return resolve({ open: false, frontmost: false });
         try {
-          const state = JSON.parse(stdout);
-          if (win && !win.isDestroyed()) win.setAlwaysOnTop(state.frontmost, state.frontmost ? "floating" : "normal");
-          resolve(state.open);
-        } catch (_) { resolve(false); }
+          resolve(JSON.parse(stdout));
+        } catch (_) { resolve({ open: false, frontmost: false }); }
       });
     });
   }
-  if (process.platform !== "win32") return Promise.resolve(false);
+  if (process.platform !== "win32") return Promise.resolve({ open: false, frontmost: false });
   return new Promise(resolve => {
     execFile("tasklist.exe", ["/FI", "IMAGENAME eq ChatGPT.exe", "/FO", "CSV", "/NH"], { windowsHide: true }, (err, stdout) => {
-      resolve(!err && /ChatGPT\.exe/i.test(stdout || ""));
+      resolve({ open: !err && /ChatGPT\.exe/i.test(stdout || ""), frontmost: false });
     });
   });
 }
@@ -246,7 +254,11 @@ async function makeSnapshot() {
     ? Number(weeklyRate.resetsAt) - Number(weeklyRate.windowDurationMins) * 60
     : 0;
   const activity = queryActivity(weeklyStartSeconds);
-  const codexOpen = await isCodexOpen();
+  const codexState = await readCodexDesktopState();
+  const codexOpen = codexState.open;
+  if (process.platform === "darwin" && win && !win.isDestroyed()) {
+    win.setAlwaysOnTop(codexState.frontmost, codexState.frontmost ? "floating" : "normal");
+  }
   const quota = rate => rate ? {
     usedPercent: Number(rate.usedPercent),
     remainingPercent: Math.max(0, 100 - Number(rate.usedPercent)),

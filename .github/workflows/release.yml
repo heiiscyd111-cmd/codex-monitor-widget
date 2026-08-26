@@ -29,6 +29,26 @@ jobs:
         run: |
           $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "v0.0.0-test" }
           ./scripts/build-release.ps1 -Version $version
+      - name: Verify Windows packages
+        shell: pwsh
+        run: |
+          $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "v0.0.0-test" }
+          $portableZip = "dist/CodexMonitor-$version-Windows-x64-Portable.zip"
+          $sourceZip = "dist/CodexMonitor-$version-Source.zip"
+          if (-not (Test-Path -LiteralPath $portableZip)) { throw "Missing $portableZip" }
+          if (-not (Test-Path -LiteralPath $sourceZip)) { throw "Missing $sourceZip" }
+          $windowsCheckDir = Join-Path $env:RUNNER_TEMP "codex-monitor-windows-check"
+          Expand-Archive -LiteralPath $portableZip -DestinationPath $windowsCheckDir
+          $portableDir = Join-Path $windowsCheckDir "CodexMonitor-$version-Windows-x64-Portable"
+          $executable = Join-Path $portableDir "CodexMonitor.exe"
+          if (-not (Test-Path -LiteralPath $executable)) { throw "Missing packaged executable" }
+          if (-not (Test-Path -LiteralPath (Join-Path $portableDir "resources/app/main.js"))) { throw "Missing packaged application" }
+          $process = Start-Process -FilePath $executable -ArgumentList "--smoke-test" -PassThru
+          if (-not $process.WaitForExit(30000)) {
+            Stop-Process -Id $process.Id -Force
+            throw "Windows smoke test timed out"
+          }
+          if ($process.ExitCode -ne 0) { throw "Windows smoke test failed with exit code $($process.ExitCode)" }
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -104,4 +124,9 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/*.zip dist/SHA256SUMS.txt --repo "${{ github.repository }}" --generate-notes --title "Codex Monitor ${{ github.ref_name }}"
+        run: |
+          if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            gh release upload "${{ github.ref_name }}" dist/*.zip dist/SHA256SUMS.txt --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "${{ github.ref_name }}" dist/*.zip dist/SHA256SUMS.txt --repo "${{ github.repository }}" --generate-notes --title "Codex Monitor ${{ github.ref_name }}"
+          fi

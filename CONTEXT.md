@@ -32,9 +32,13 @@ _Avoid_: Dock application
 The CLI used to run the local Codex app server: prefer the official desktop application's bundled CLI, then fall back to a Homebrew-installed CLI at a known platform path.
 _Avoid_: Shell-dependent PATH lookup
 
+**Full desktop mode**:
+A macOS installation with the official Codex desktop application; its bundled runtime, launch detection, foreground integration, and deep links are available.
+_Avoid_: Desktop-backed mode
+
 **CLI-only mode**:
 A macOS installation with a Homebrew Codex runtime but no desktop application; quota and local task monitoring remain available, while desktop launch, foreground, and deep-link integration do not.
-_Avoid_: Full desktop mode
+_Avoid_: Homebrew mode
 
 **Cross-platform release**:
 A single tagged release containing the unchanged Windows portable release and both macOS architecture builds.
