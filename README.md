@@ -2,6 +2,19 @@
 
 Windows 与 macOS 上的 Codex 用量与对话状态悬浮小组件。
 
+## 最新版下载
+
+当前版本：[Codex Monitor v1.0.7](https://github.com/heiiscyd111-cmd/codex-monitor-widget/releases/tag/v1.0.7)
+
+| 系统 | 下载文件 | 适用设备 |
+| --- | --- | --- |
+| Windows | [Windows x64 便携版](https://github.com/heiiscyd111-cmd/codex-monitor-widget/releases/download/v1.0.7/CodexMonitor-v1.0.7-Windows-x64-Portable.zip) | Windows 10/11 64 位 |
+| macOS Apple 芯片 | [macOS arm64](https://github.com/heiiscyd111-cmd/codex-monitor-widget/releases/download/v1.0.7/CodexMonitor-v1.0.7-macOS-arm64.zip) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Intel | [macOS x64](https://github.com/heiiscyd111-cmd/codex-monitor-widget/releases/download/v1.0.7/CodexMonitor-v1.0.7-macOS-x64.zip) | “关于本机”中显示 Intel 的 Mac |
+| 源码 | [Source ZIP](https://github.com/heiiscyd111-cmd/codex-monitor-widget/releases/download/v1.0.7/CodexMonitor-v1.0.7-Source.zip) | 需要 Node.js 22.12+ |
+
+Windows 和 macOS 安装包均已内置 Electron，不需要另外安装 Node.js、npm 或 OpenAI API Key。使用前需要安装并登录 Codex Desktop；macOS 也支持已经登录的 Homebrew Codex CLI。
+
 ## 功能
 
 - 本周额度、重置时间和倒计时
@@ -37,28 +50,28 @@ Windows 与 macOS 上的 Codex 用量与对话状态悬浮小组件。
 - **状态灯**：绿色表示有 Codex 对话正在生成或执行工具，灰色表示当前没有任务运行。
 - Token 与模型统计来自本机 Codex 日志；内部审核模型不会计入模型明细。
 
-## 下载哪个版本？
+## 下载版本说明
 
-请从仓库右侧 **Releases** 下载，不要下载 GitHub 自动生成的 “Source code”。
+请使用上方链接或仓库右侧 **Releases** 下载，不要下载 GitHub 自动生成的 “Source code”。
 
 ### Windows x64 便携版
 
-`CodexMonitor-vX.Y.Z-Windows-x64-Portable.zip`
+`CodexMonitor-v1.0.7-Windows-x64-Portable.zip`
 
 - 内置 Electron 运行环境
 - 不需要 Node.js 或 npm
 - 解压后双击 `CodexMonitor.exe`
 
-### macOS 内部试用版
+### macOS 版
 
-- Apple Silicon：`CodexMonitor-vX.Y.Z-macOS-arm64.zip`
-- Intel：`CodexMonitor-vX.Y.Z-macOS-x64.zip`
+- Apple Silicon：`CodexMonitor-v1.0.7-macOS-arm64.zip`
+- Intel：`CodexMonitor-v1.0.7-macOS-x64.zip`
 - 内置 Electron，不需要 Node.js 或 npm
 - 当前未签名，首次运行需要在“系统设置 → 隐私与安全性”中手动允许
 
 ### 轻量源码版
 
-`CodexMonitor-vX.Y.Z-Source.zip`
+`CodexMonitor-v1.0.7-Source.zip`
 
 - 不内置 Electron
 - 需要 Node.js 22.12 或更高版本
