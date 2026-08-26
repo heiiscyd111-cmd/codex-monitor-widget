@@ -1,6 +1,6 @@
 {
   "name": "codex-status-widget",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Windows and macOS desktop widget for monitoring Codex usage and active conversations.",
   "main": "main.js",
   "license": "MIT",

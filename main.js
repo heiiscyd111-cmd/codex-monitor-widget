@@ -5,9 +5,10 @@ const path = require("path");
 const os = require("os");
 const { DatabaseSync } = require("node:sqlite");
 
-const CODEX_HOME = path.join(os.homedir(), ".codex");
+const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 const STATE_DB = path.join(CODEX_HOME, "state_5.sqlite");
 const LOG_DB = path.join(CODEX_HOME, "logs_2.sqlite");
+const AUTH_FILE = path.join(CODEX_HOME, "auth.json");
 const SMOKE_TEST = process.argv.includes("--smoke-test");
 let win;
 let tray;
@@ -21,6 +22,104 @@ let rpcCallbacks = new Map();
 let foregroundWatcher;
 let tooltipWin;
 let pendingTooltipText = "";
+let authSubscriptionCache = { mtimeMs: -1, planType: null, expiresAt: null };
+let alwaysOnTopAll = false;
+let codexIsForeground = false;
+
+function decodeJwtPayload(token) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length !== 3) return null;
+    return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+  } catch (_) { return null; }
+}
+
+function collectJwtPayloads(value, output = []) {
+  if (typeof value === "string") {
+    const payload = decodeJwtPayload(value);
+    if (payload) output.push(payload);
+  } else if (Array.isArray(value)) {
+    for (const item of value) collectJwtPayloads(item, output);
+  } else if (value && typeof value === "object") {
+    for (const item of Object.values(value)) collectJwtPayloads(item, output);
+  }
+  return output;
+}
+
+function dateToMilliseconds(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "number") {
+    const milliseconds = value < 1e12 ? value * 1000 : value;
+    return Number.isFinite(milliseconds) ? milliseconds : null;
+  }
+  const milliseconds = Date.parse(String(value));
+  return Number.isFinite(milliseconds) ? milliseconds : null;
+}
+
+function readCodexSubscription() {
+  try {
+    const mtimeMs = fs.statSync(AUTH_FILE).mtimeMs;
+    if (authSubscriptionCache.mtimeMs === mtimeMs) return authSubscriptionCache;
+    const authFile = JSON.parse(fs.readFileSync(AUTH_FILE, "utf8"));
+    const candidates = collectJwtPayloads(authFile)
+      .map(payload => payload["https://api.openai.com/auth"])
+      .filter(Boolean)
+      .map(claims => ({
+        planType: claims.chatgpt_plan_type ? String(claims.chatgpt_plan_type).toLowerCase() : null,
+        expiresAt: dateToMilliseconds(claims.chatgpt_subscription_active_until),
+        checkedAt: dateToMilliseconds(claims.chatgpt_subscription_last_checked) || 0,
+      }))
+      .sort((a, b) => b.checkedAt - a.checkedAt);
+    const current = candidates.find(item => item.planType || item.expiresAt) || {};
+    authSubscriptionCache = {
+      mtimeMs,
+      planType: current.planType || null,
+      expiresAt: current.expiresAt || null,
+    };
+  } catch (_) {
+    authSubscriptionCache = { mtimeMs: -1, planType: null, expiresAt: null };
+  }
+  return authSubscriptionCache;
+}
+
+function subscriptionFile() {
+  return path.join(app.getPath("userData"), "subscription.json");
+}
+
+function settingsFile() {
+  return path.join(app.getPath("userData"), "settings.json");
+}
+
+function readSettings() {
+  try {
+    const settings = JSON.parse(fs.readFileSync(settingsFile(), "utf8"));
+    alwaysOnTopAll = settings.alwaysOnTopAll === true;
+  } catch (_) {
+    alwaysOnTopAll = false;
+  }
+}
+
+function saveSettings() {
+  fs.mkdirSync(app.getPath("userData"), { recursive: true });
+  fs.writeFileSync(settingsFile(), JSON.stringify({ alwaysOnTopAll }), "utf8");
+}
+
+function readSubscriptionExpiry() {
+  try {
+    const data = JSON.parse(fs.readFileSync(subscriptionFile(), "utf8"));
+    return Number(data.expiresAt) || null;
+  } catch (_) { return null; }
+}
+
+function saveSubscriptionExpiry(dateText) {
+  const match = String(dateText || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const expiresAt = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999).getTime();
+  if (!Number.isFinite(expiresAt)) return null;
+  fs.mkdirSync(app.getPath("userData"), { recursive: true });
+  fs.writeFileSync(subscriptionFile(), JSON.stringify({ expiresAt }), "utf8");
+  return expiresAt;
+}
 
 function findCodexBinary() {
   if (process.platform === "darwin") {
@@ -81,7 +180,7 @@ function startAppServer() {
   server.on("error", reconnect);
   server.stdin.on("error", reconnect);
   server.on("exit", reconnect);
-  rpc("initialize", { clientInfo: { name: "codex-status-widget", version: "1.0.0" }, capabilities: {} })
+  rpc("initialize", { clientInfo: { name: "codex-status-widget", version: app.getVersion() }, capabilities: {} })
     .then(refreshRateLimits)
     .catch(() => {});
 }
@@ -254,10 +353,13 @@ async function makeSnapshot() {
     ? Number(weeklyRate.resetsAt) - Number(weeklyRate.windowDurationMins) * 60
     : 0;
   const activity = queryActivity(weeklyStartSeconds);
+  const authSubscription = readCodexSubscription();
+  const manualSubscriptionExpiresAt = readSubscriptionExpiry();
   const codexState = await readCodexDesktopState();
   const codexOpen = codexState.open;
-  if (process.platform === "darwin" && win && !win.isDestroyed()) {
-    win.setAlwaysOnTop(codexState.frontmost, codexState.frontmost ? "floating" : "normal");
+  if (process.platform === "darwin") {
+    codexIsForeground = codexState.frontmost;
+    applyWindowLevel();
   }
   const quota = rate => rate ? {
     usedPercent: Number(rate.usedPercent),
@@ -273,7 +375,9 @@ async function makeSnapshot() {
     dailyTokens: activity.dailyTokens,
     weeklyTokens: activity.weeklyTokens,
     weeklyModelUsage: activity.weeklyModelUsage,
-    planType: lastRateLimits && lastRateLimits.planType,
+    planType: authSubscription.planType || (lastRateLimits && lastRateLimits.planType),
+    subscriptionExpiresAt: authSubscription.expiresAt || manualSubscriptionExpiresAt,
+    subscriptionExpirySource: authSubscription.expiresAt ? "codex-auth" : (manualSubscriptionExpiresAt ? "manual" : null),
     fiveHour: quota(fiveHourRate),
     weekly: quota(weeklyRate),
     rateLimitReached: !!(lastRateLimits && lastRateLimits.rateLimitReachedType),
@@ -307,13 +411,26 @@ function startForegroundWatcher() {
     buffer = lines.pop() || "";
     const processName = (lines.pop() || "").trim().toLowerCase();
     if (!win || win.isDestroyed()) return;
-    const codexIsForeground = processName === "chatgpt";
-    win.setAlwaysOnTop(codexIsForeground, codexIsForeground ? "floating" : "normal");
+    codexIsForeground = processName === "chatgpt";
+    applyWindowLevel();
   });
   foregroundWatcher.on("exit", () => {
     foregroundWatcher = null;
     setTimeout(startForegroundWatcher, 3000);
   });
+}
+
+function applyWindowLevel() {
+  if (!win || win.isDestroyed()) return;
+  const shouldFloat = alwaysOnTopAll || codexIsForeground;
+  win.setAlwaysOnTop(shouldFloat, shouldFloat ? "floating" : "normal");
+}
+
+function setAlwaysOnTopAll(enabled) {
+  alwaysOnTopAll = !!enabled;
+  saveSettings();
+  applyWindowLevel();
+  updateTrayMenu();
 }
 
 function createTooltipWindow() {
@@ -358,6 +475,18 @@ function showQuotaTooltip(detail) {
   tooltipWin.webContents.send("quota-tooltip", payload);
   tooltipWin.showInactive();
 }
+function setWidgetCompact(compact) {
+  if (!win || win.isDestroyed()) return;
+  const display = screen.getDisplayMatching(win.getBounds());
+  const area = display.workArea;
+  const width = Math.min(compact ? 315 : 470, area.width - 24);
+  const bounds = win.getBounds();
+  if (bounds.width === width) return;
+  win.setResizable(true);
+  win.setBounds({ x: area.x + Math.round((area.width - width) / 2), y: bounds.y, width, height: 78 }, false);
+  win.setResizable(false);
+}
+
 function createWindow() {
   const area = screen.getPrimaryDisplay().workArea;
   const widgetWidth = Math.min(470, area.width - 24);
@@ -372,7 +501,7 @@ function createWindow() {
     resizable: false,
     show: false,
     skipTaskbar: true,
-    alwaysOnTop: false,
+    alwaysOnTop: alwaysOnTopAll,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -390,22 +519,34 @@ function createWindow() {
   });
 }
 
+function updateTrayMenu() {
+  if (!tray || tray.isDestroyed()) return;
+  tray.setToolTip(alwaysOnTopAll ? "Codex 状态 · 已始终置顶" : "Codex 状态");
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "显示 / 隐藏", click: () => win && (win.isVisible() ? win.hide() : win.show()) },
+    { label: "立即刷新", click: async () => { await refreshRateLimits(); await makeSnapshot(); } },
+    {
+      label: "始终置顶所有窗口",
+      type: "checkbox",
+      checked: alwaysOnTopAll,
+      click: item => setAlwaysOnTopAll(item.checked),
+    },
+    { type: "separator" },
+    { label: "退出小组件", click: () => app.quit() },
+  ]));
+}
+
 function createTray() {
   const isMac = process.platform === "darwin";
   const icon = nativeImage.createFromPath(path.join(__dirname, isMac ? "iconTemplate.png" : "icon.png"));
   if (isMac) icon.setTemplateImage(true);
   tray = new Tray(isMac ? icon : icon.resize({ width: 16, height: 16 }));
-  tray.setToolTip("Codex 状态");
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "显示 / 隐藏", click: () => win && (win.isVisible() ? win.hide() : win.show()) },
-    { label: "立即刷新", click: async () => { await refreshRateLimits(); await makeSnapshot(); } },
-    { type: "separator" },
-    { label: "退出小组件", click: () => app.quit() },
-  ]));
+  updateTrayMenu();
   if (!isMac) tray.on("click", () => win && (win.isVisible() ? win.hide() : win.show()));
 }
 
 app.whenReady().then(() => {
+  readSettings();
   if (process.platform === "win32") {
     app.setAppUserModelId("com.openai.codex.status-widget");
     if (!SMOKE_TEST) app.setLoginItemSettings({ openAtLogin: true, path: process.execPath, args: process.defaultApp ? [__dirname] : [] });
@@ -423,6 +564,12 @@ app.whenReady().then(() => {
 });
 
 ipcMain.handle("get-status", makeSnapshot);
+ipcMain.handle("set-subscription-expiry", async (_event, dateText) => {
+  const expiresAt = saveSubscriptionExpiry(dateText);
+  await makeSnapshot();
+  return expiresAt;
+});
+ipcMain.on("set-widget-compact", (_event, compact) => setWidgetCompact(!!compact));
 ipcMain.on("hide-widget", () => win && win.hide());
 ipcMain.on("open-codex", () => shell.openExternal("codex://"));
 ipcMain.on("open-task", (_event, threadId) => shell.openExternal(`codex://thread/${encodeURIComponent(threadId)}`));
