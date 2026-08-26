@@ -17,7 +17,8 @@ This repository uses a single-context layout:
 /
 ├── CONTEXT.md
 ├── docs/adr/
-└── src/
+├── main.js
+└── package.json
 ```
 
 ## Use the glossary's vocabulary

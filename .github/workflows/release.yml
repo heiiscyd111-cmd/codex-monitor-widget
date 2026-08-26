@@ -126,6 +126,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' | while IFS= read -r asset; do
+              gh release delete-asset "${{ github.ref_name }}" "$asset" --repo "${{ github.repository }}" --yes
+            done
             gh release upload "${{ github.ref_name }}" dist/*.zip dist/SHA256SUMS.txt --repo "${{ github.repository }}" --clobber
           else
             gh release create "${{ github.ref_name }}" dist/*.zip dist/SHA256SUMS.txt --repo "${{ github.repository }}" --generate-notes --title "Codex Monitor ${{ github.ref_name }}"
