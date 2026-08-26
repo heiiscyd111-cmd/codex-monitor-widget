@@ -113,6 +113,12 @@ npm run build:release
 - 尚未进行商业代码签名，首次运行可能出现 SmartScreen 提示。
 - Codex Desktop 更新本地数据结构后可能需要同步适配。
 
+## 商用
+
+本项目允许在遵守 MIT License 的前提下用于商业项目。商用分发必须保留许可证和版权声明，不得冒充 OpenAI/Codex 官方产品；OpenAI、ChatGPT、Codex 等第三方名称与标识不包含在本项目的 MIT 授权中。
+
+完整要求请阅读：[商用要求](COMMERCIAL_USE.md)
+
 ## License
 
 [MIT](LICENSE)
