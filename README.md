@@ -17,10 +17,6 @@ Windows 上的 Codex Plus 用量与对话状态悬浮小组件。
 
 ![Codex Monitor 主界面](docs/images/widget-main.png)
 
-### 后续预测窗口
-
-![Codex Monitor 后续预测窗口](docs/images/prediction-tooltip.png)
-
 ## 下载哪个版本？
 
 请从仓库右侧 **Releases** 下载，不要下载 GitHub 自动生成的 “Source code”。

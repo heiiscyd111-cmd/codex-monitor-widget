@@ -277,6 +277,9 @@ function createTooltipWindow() {
 function showQuotaTooltip(text) {
   if (!tooltipWin || tooltipWin.isDestroyed() || !win || win.isDestroyed()) return;
   pendingTooltipText = String(text || "");
+  const predictionCount = pendingTooltipText.split(/\r?\n/).filter(line => /^\s*\d+[.、]/.test(line)).length;
+  const tooltipHeight = predictionCount ? 34 + predictionCount * 17 : 52;
+  tooltipWin.setSize(145, tooltipHeight, false);
   const cursor = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursor).workArea;
   const size = tooltipWin.getBounds();
