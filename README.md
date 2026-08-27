@@ -15,6 +15,20 @@ Windows 与 macOS 上的 Codex 用量与对话状态悬浮小组件。
 
 Windows 和 macOS 安装包均已内置 Electron，不需要另外安装 Node.js、npm 或 OpenAI API Key。使用前需要安装并登录 Codex Desktop；macOS 也支持已经登录的 Homebrew Codex CLI。
 
+## 实机效果
+
+### 主界面
+
+![Codex Monitor 主界面](docs/images/widget-main-svg-v2.png)
+
+### 主界面与预测浮窗
+
+![Codex Monitor 主界面与后续预测浮窗](docs/images/widget-forecast-svg-v2.png)
+
+### 本周用量悬浮窗
+
+![Codex Monitor 本周 Token 与模型用量](docs/images/widget-weekly-usage-v1.0.5.png)
+
 ## 功能
 
 功能按照主界面从左到右排列：
@@ -37,20 +51,6 @@ Windows 和 macOS 安装包均已内置 Electron，不需要另外安装 Node.js
 5. **显示与置顶**
    - 打开 Codex 时自动显示，并在 Codex 位于前台时悬浮。
    - 托盘/菜单栏可切换“始终置顶所有窗口”，并记住选择。
-
-## 实机效果
-
-### 主界面
-
-![Codex Monitor 主界面](docs/images/widget-main-svg-v2.png)
-
-### 主界面与预测浮窗
-
-![Codex Monitor 主界面与后续预测浮窗](docs/images/widget-forecast-svg-v2.png)
-
-### 本周用量悬浮窗
-
-![Codex Monitor 本周 Token 与模型用量](docs/images/widget-weekly-usage-v1.0.5.png)
 
 ## 界面说明
 
